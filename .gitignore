@@ -1,0 +1,7 @@
+publish/
+build/
+*.pdb
+*.obj
+*.o
+Imzalama.pfx
+PFX-PAROLA.txt
