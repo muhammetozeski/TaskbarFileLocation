@@ -57,3 +57,5 @@ The compiled module is placed in `publish\AppData\TaskbarFileLocation.dll`, rela
 ## Verified behavior
 
 The taskbar command opened the executable directories for Windhawk, WinRAR and ChatGPT (the Codex desktop package). The command appeared after enabling the module without restarting Explorer. Directory access used normal user privileges.
+
+Mouse 5 opened the Chrome and ChatGPT executable directories in a single window without the previous delay. Folder opening uses one Explorer request on the existing apartment worker; the taskbar input callback does not wait for it.
