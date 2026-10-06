@@ -207,6 +207,7 @@ DWORD WINAPI HostThreadProcedure(void* ready) {
 
 struct MenuRow {
     Controls::ListViewBase List{nullptr};
+    FrameworkElement Section{nullptr};
     Controls::Panel Parent{nullptr};
     Controls::StackPanel Wrapper{nullptr};
     Controls::Button Button{nullptr};
@@ -224,7 +225,7 @@ void RemoveRows(UiState& state) {
         if (row.Parent.Children().IndexOf(row.Wrapper, index)) {
             row.Wrapper.Children().Clear();
             row.Parent.Children().RemoveAt(index);
-            row.Parent.Children().InsertAt(index, row.List);
+            row.Parent.Children().InsertAt(index, row.Section);
         }
     }
     state.Rows.clear();
@@ -324,15 +325,26 @@ bool EnsureMenuRow(void* rawFrame) {
             found->Label.Text(English ? L"Open File Location" : L"Dosya Konumunu Aç");
             return false;
         }
-        auto parent = Media::VisualTreeHelper::GetParent(list).try_as<Controls::Panel>();
+        FrameworkElement section = list;
+        auto parentObject = Media::VisualTreeHelper::GetParent(section);
+        Controls::Panel parent{nullptr};
+        for (unsigned depth = 0; parentObject && depth < 12; ++depth) {
+            parent = parentObject.try_as<Controls::Panel>();
+            if (parent) break;
+            auto ancestor = parentObject.try_as<FrameworkElement>();
+            if (!ancestor) break;
+            section = ancestor;
+            parentObject = Media::VisualTreeHelper::GetParent(section);
+        }
         if (!parent) {
             Wh_SetStringValue(L"MenuStage", L"list-parent-is-not-panel");
             return false;
         }
         uint32_t index{};
-        if (!parent.Children().IndexOf(list, index)) return false;
+        if (!parent.Children().IndexOf(section, index)) return false;
         MenuRow row;
         row.List = list;
+        row.Section = section;
         row.Parent = parent;
         row.Button = Controls::Button();
         row.Label = Controls::TextBlock();
@@ -371,19 +383,19 @@ bool EnsureMenuRow(void* rawFrame) {
             } catch (...) { Wh_Log(L"Menu action failed with an unexpected exception"); }
         });
         row.Wrapper = Controls::StackPanel();
-        Controls::Grid::SetRow(row.Wrapper, Controls::Grid::GetRow(list));
-        Controls::Grid::SetColumn(row.Wrapper, Controls::Grid::GetColumn(list));
-        Controls::Grid::SetRowSpan(row.Wrapper, Controls::Grid::GetRowSpan(list));
-        Controls::Grid::SetColumnSpan(row.Wrapper, Controls::Grid::GetColumnSpan(list));
+        Controls::Grid::SetRow(row.Wrapper, Controls::Grid::GetRow(section));
+        Controls::Grid::SetColumn(row.Wrapper, Controls::Grid::GetColumn(section));
+        Controls::Grid::SetRowSpan(row.Wrapper, Controls::Grid::GetRowSpan(section));
+        Controls::Grid::SetColumnSpan(row.Wrapper, Controls::Grid::GetColumnSpan(section));
         parent.Children().RemoveAt(index);
         try {
             row.Wrapper.Children().Append(row.Button);
-            row.Wrapper.Children().Append(list);
+            row.Wrapper.Children().Append(section);
             parent.Children().InsertAt(index, row.Wrapper);
         } catch (...) {
             row.Button.Click(row.ClickToken);
             row.Wrapper.Children().Clear();
-            parent.Children().InsertAt(index, list);
+            parent.Children().InsertAt(index, section);
             throw;
         }
         state.Rows.push_back(std::move(row));
