@@ -57,7 +57,7 @@ foreach ($folder in @($engineDirectory, $modsDirectory)) {
     if ($LASTEXITCODE -ne 0) { throw "Could not grant shell directory access to $folder." }
 }
 $engineSettings = Join-Path $engineDirectory 'settings.ini'
-foreach ($file in @($engineSettings, $configurationFile)) {
+foreach ($file in @($engineSettings, $configurationFile, (Join-Path $paths.Engine 'engine.ini'))) {
     & icacls $file /grant '*S-1-15-2-1:(R)' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not grant shell configuration access to $file." }
 }
