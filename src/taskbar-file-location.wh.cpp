@@ -3,7 +3,7 @@
 // @name            Dosya Konumunu Aç
 // @name:en-US      Open File Location
 // @description     Opens the app executable's folder from its existing taskbar menu
-// @version         1.2.0
+// @version         1.3.0
 // @author          Portakal
 // @license         MIT
 // @include         explorer.exe
@@ -20,11 +20,11 @@
   $options:
   - tr: Türkçe
   - en: English
-- mouse4OpensFolder: true
-  $name: Open file location with Mouse 4
-  $name:tr-TR: Mouse 4 ile dosya konumunu aç
-  $description: Click an app's taskbar icon with the first side button to open its executable folder directly.
-  $description:tr-TR: Programın görev çubuğu simgesine farenin ilk yan düğmesiyle tıklayınca EXE klasörünü doğrudan açar.
+- mouse5OpensFolder: true
+  $name: Open file location with Mouse 5
+  $name:tr-TR: Mouse 5 ile dosya konumunu aç
+  $description: Click an app's taskbar icon with the second side button to open its executable folder directly.
+  $description:tr-TR: Programın görev çubuğu simgesine farenin ikinci yan düğmesiyle tıklayınca EXE klasörünü doğrudan açar.
 */
 // ==/WindhawkModSettings==
 
@@ -34,7 +34,7 @@
 #include <winrt/Windows.UI.Xaml.Input.h>
 
 namespace {
-std::atomic<bool> MouseFourEnabled{true};
+std::atomic<bool> MouseFiveEnabled{true};
 std::atomic<bool> MouseHooksInstalled{};
 constexpr GUID TaskbarViewImage{0x24534974, 0xe00e, 0x46a5,
     {0x8f, 0x69, 0xf6, 0x0d, 0x0c, 0xeb, 0x9b, 0xd9}};
@@ -51,31 +51,22 @@ ContainerModelFunction ReadGroupModel{};
 ContainerModelFunction ReadWindowModel{};
 decltype(&LoadLibraryExW) MouseLoadLibraryOriginal{};
 
-/// Opens the containing directory in File Explorer, using an explicit Explorer fallback.
+/// Sends exactly one folder-open request to Explorer from the apartment worker.
 void OpenExecutableFolder(const std::wstring& executable) {
     auto separator = executable.find_last_of(L"\\/");
     if (separator == std::wstring::npos) throw_hresult(E_INVALIDARG);
     std::wstring directory = executable.substr(0, separator == 2 ? 3 : separator);
-    PIDLIST_ABSOLUTE folder{};
-    HRESULT result = SHParseDisplayName(directory.c_str(), nullptr, &folder, 0, nullptr);
-    if (SUCCEEDED(result)) {
-        result = SHOpenFolderAndSelectItems(folder, 0, nullptr, 0);
-        CoTaskMemFree(folder);
-    }
-    if (FAILED(result)) {
-        Wh_Log(L"Shell folder open failed: %08X. Trying Explorer.", static_cast<UINT>(result));
-        wchar_t windowsDirectory[MAX_PATH]{};
-        if (!GetWindowsDirectoryW(windowsDirectory, ARRAYSIZE(windowsDirectory)))
-            throw_last_error();
-        std::wstring explorer = std::wstring(windowsDirectory) + L"\\explorer.exe";
-        std::wstring arguments = L"\"" + directory + L"\"";
-        SHELLEXECUTEINFOW execution{sizeof(execution)};
-        execution.fMask = SEE_MASK_FLAG_NO_UI;
-        execution.lpFile = explorer.c_str();
-        execution.lpParameters = arguments.c_str();
-        execution.nShow = SW_SHOWNORMAL;
-        if (!ShellExecuteExW(&execution)) throw_last_error();
-    }
+    wchar_t windowsDirectory[MAX_PATH]{};
+    if (!GetWindowsDirectoryW(windowsDirectory, ARRAYSIZE(windowsDirectory)))
+        throw_last_error();
+    std::wstring explorer = std::wstring(windowsDirectory) + L"\\explorer.exe";
+    std::wstring arguments = L"\"" + directory + L"\"";
+    SHELLEXECUTEINFOW execution{sizeof(execution)};
+    execution.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_ASYNCOK;
+    execution.lpFile = explorer.c_str();
+    execution.lpParameters = arguments.c_str();
+    execution.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&execution)) throw_last_error();
     Wh_SetStringValue(L"LastOpenedDirectory", directory.c_str());
     Wh_SetIntValue(L"LastOpenSucceeded", 1);
     Wh_Log(L"Opened directory: %s", directory.c_str());
@@ -152,9 +143,9 @@ std::wstring GetTaskGroupExecutable(IUnknown* group, const std::wstring& appId) 
     return TaskbarMenu::Detail::ResolveExecutable(std::move(path));
 }
 
-/// Handles only Mouse 4 on app icons; other input goes to Windows unchanged.
+/// Handles only Mouse 5 on app icons; other input goes to Windows unchanged.
 HRESULT WINAPI PointerPressedHook(void* sender, void* arguments) {
-    if (!MouseFourEnabled || TaskbarMenu::Detail::Stopping)
+    if (!MouseFiveEnabled || TaskbarMenu::Detail::Stopping)
         return PointerPressedOriginal(sender, arguments);
     try {
         UIElement element{nullptr};
@@ -165,30 +156,33 @@ HRESULT WINAPI PointerPressedHook(void* sender, void* arguments) {
             guid_of<Input::PointerRoutedEventArgs>(), put_abi(args)));
         auto point = args.GetCurrentPoint(element);
         if (point.Properties().PointerUpdateKind() !=
-                Windows::UI::Input::PointerUpdateKind::XButton1Pressed)
+                Windows::UI::Input::PointerUpdateKind::XButton2Pressed)
             return PointerPressedOriginal(sender, arguments);
 
         args.Handled(true);
-        Wh_SetStringValue(L"MouseFourStage", L"pressed");
+        Wh_SetStringValue(L"MouseFiveStage", L"pressed");
         auto group = GetClickedTaskGroup(element);
         hstring appId{ReadTaskProperty<HSTRING>(group.get(), 6), take_ownership_from_abi};
         hstring programName{ReadTaskProperty<HSTRING>(group.get(), 8), take_ownership_from_abi};
-        Wh_SetStringValue(L"LastMouseFourApplicationId", appId.c_str());
+        Wh_SetStringValue(L"LastMouseFiveApplicationId", appId.c_str());
+        auto started = GetTickCount64();
         auto executable = GetTaskGroupExecutable(group.get(), std::wstring(appId));
-        OpenExecutableFolder(executable);
-        Wh_SetStringValue(L"LastMouseFourExecutable", executable.c_str());
-        Wh_SetStringValue(L"LastMouseFourProgramName", programName.c_str());
-        Wh_SetStringValue(L"MouseFourStage", L"opened");
-        Wh_SetIntValue(L"LastMouseFourError", 0);
-        Wh_Log(L"Mouse 4 opened %s executable directory: %s",
+        Wh_SetIntValue(L"LastMouseFiveResolveMs", GetTickCount64() - started);
+        if (!TaskbarMenu::Detail::QueueAction(executable, std::wstring(programName)))
+            throw_hresult(HRESULT_FROM_WIN32(ERROR_NOT_READY));
+        Wh_SetStringValue(L"LastMouseFiveExecutable", executable.c_str());
+        Wh_SetStringValue(L"LastMouseFiveProgramName", programName.c_str());
+        Wh_SetStringValue(L"MouseFiveStage", L"queued");
+        Wh_SetIntValue(L"LastMouseFiveError", 0);
+        Wh_Log(L"Mouse 5 queued %s executable directory: %s",
             programName.c_str(), executable.c_str());
         return S_OK;
     } catch (const hresult_error& error) {
-        Wh_SetIntValue(L"LastMouseFourError", error.code());
-        Wh_SetStringValue(L"MouseFourStage", error.message().c_str());
-        Wh_Log(L"Mouse 4 folder action failed: %08X %s",
+        Wh_SetIntValue(L"LastMouseFiveError", error.code());
+        Wh_SetStringValue(L"MouseFiveStage", error.message().c_str());
+        Wh_Log(L"Mouse 5 folder action failed: %08X %s",
             static_cast<UINT>(error.code()), error.message().c_str());
-    } catch (...) { Wh_Log(L"Mouse 4 folder action failed with an unexpected exception"); }
+    } catch (...) { Wh_Log(L"Mouse 5 folder action failed with an unexpected exception"); }
     return S_OK;
 }
 
@@ -214,11 +208,11 @@ bool IsSupportedTaskbarView(HMODULE module) {
 }
 
 /// Hooks the app button callback without downloading symbols at runtime.
-bool HookMouseFour(HMODULE module) {
+bool HookMouseFive(HMODULE module) {
     if (MouseHooksInstalled || !module) return true;
     if (!IsSupportedTaskbarView(module)) {
-        Wh_SetStringValue(L"MouseFourHookStatus", L"unsupported-taskbar-image");
-        Wh_Log(L"Mouse 4 Taskbar.View symbol identity has not been verified");
+        Wh_SetStringValue(L"MouseFiveHookStatus", L"unsupported-taskbar-image");
+        Wh_Log(L"Mouse 5 Taskbar.View symbol identity has not been verified");
         return false;
     }
     auto base = reinterpret_cast<BYTE*>(module);
@@ -228,7 +222,7 @@ bool HookMouseFour(HMODULE module) {
             reinterpret_cast<void**>(&PointerPressedOriginal)))
         return false;
     MouseHooksInstalled = true;
-    Wh_SetStringValue(L"MouseFourHookStatus", L"installed");
+    Wh_SetStringValue(L"MouseFiveHookStatus", L"installed");
     return true;
 }
 
@@ -237,14 +231,14 @@ HMODULE WINAPI MouseLoadLibraryHook(LPCWSTR name, HANDLE file, DWORD flags) {
     auto module = MouseLoadLibraryOriginal(name, file, flags);
     if (!TaskbarMenu::Detail::Stopping && !MouseHooksInstalled && module &&
             module == GetModuleHandleW(L"Taskbar.View.dll"))
-        if (HookMouseFour(module)) Wh_ApplyHookOperations();
+        if (HookMouseFive(module)) Wh_ApplyHookOperations();
     return module;
 }
 
-/// Registers Mouse 4 in Explorer; the menu host keeps its existing registration.
-bool InitializeMouseFour() {
+/// Registers Mouse 5 in Explorer; the menu host keeps its existing registration.
+bool InitializeMouseFive() {
     if (!TaskbarMenu::Detail::IsExplorer) return true;
-    if (auto module = GetModuleHandleW(L"Taskbar.View.dll")) return HookMouseFour(module);
+    if (auto module = GetModuleHandleW(L"Taskbar.View.dll")) return HookMouseFive(module);
     auto loader = GetProcAddress(GetModuleHandleW(L"kernelbase.dll"), "LoadLibraryExW");
     return loader && Wh_SetFunctionHook(reinterpret_cast<void*>(loader),
         reinterpret_cast<void*>(MouseLoadLibraryHook),
@@ -253,8 +247,8 @@ bool InitializeMouseFour() {
 
 /// Supplies localized text and the app-specific action in one registration call.
 bool RegisterFolderButton() {
-    MouseFourEnabled = Wh_GetIntSetting(L"mouse4OpensFolder") != 0;
-    Wh_SetIntValue(L"MouseFourEnabled", MouseFourEnabled ? 1 : 0);
+    MouseFiveEnabled = Wh_GetIntSetting(L"mouse5OpensFolder") != 0;
+    Wh_SetIntValue(L"MouseFiveEnabled", MouseFiveEnabled ? 1 : 0);
     auto language = Wh_GetStringSetting(L"language");
     std::wstring name = language && _wcsicmp(language, L"en") == 0
         ? L"Open File Location" : L"Dosya Konumunu Aç";
@@ -266,5 +260,5 @@ bool RegisterFolderButton() {
         });
 }
 }
-BOOL Wh_ModInit() { return RegisterFolderButton() && InitializeMouseFour(); }
+BOOL Wh_ModInit() { return RegisterFolderButton() && InitializeMouseFive(); }
 void Wh_ModSettingsChanged() { RegisterFolderButton(); }

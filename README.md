@@ -8,7 +8,7 @@ Open an application's executable folder directly from its taskbar menu.
 
 Right-click an application on the taskbar and select **Dosya Konumunu Aç**. The English label is **Open File Location**. Existing application tasks, recent items and window commands are preserved.
 
-Click an application's taskbar icon with **Mouse 4** (the first side button) to open its executable folder directly. **Open file location with Mouse 4** is enabled by default in Windhawk settings. Turning it off takes effect when the settings are saved.
+Click an application's taskbar icon with **Mouse 5** (the second side button) to open its executable folder directly. **Open file location with Mouse 5** is enabled by default in Windhawk settings. Turning it off takes effect when the settings are saved.
 
 The extension reads the application path from the Windows jump-list session. File Explorer opens the executable's containing directory; shortcuts are resolved to their targets. Packaged applications are matched by application identity to a running process, and Windows supplies the executable path.
 
@@ -17,7 +17,7 @@ The extension reads the application path from the Windows jump-list session. Fil
 - Windows 11, 64-bit.
 - Portable [Windhawk](https://windhawk.net/), already running.
 - This first version targets **JumpViewUI.dll 10.0.26100.9549**, symbol identifier **ADF87E5879A2571AC6566850798F0A6B1**.
-- The Mouse 4 callback targets **Taskbar.View.dll 2608.26001.200.0**, symbol identifier **24534974E00E46A58F69F60D0CEB9BD91**.
+- The Mouse 5 callback targets **Taskbar.View.dll 2608.26001.200.0**, symbol identifier **24534974E00E46A58F69F60D0CEB9BD91**.
 
 The extension checks that identity before attaching its native hooks. It does not download symbols or packages.
 
@@ -35,7 +35,7 @@ For a Windhawk directory that is not available through PATH:
 pwsh -File .\Install.ps1 -WindhawkDirectory "C:\Path\To\Windhawk"
 ```
 
-The installer registers **Dosya Konumunu Aç** in Windhawk, keeps the existing language and Mouse 4 preferences and grants the shell host read access to the required Windhawk files. Settings and logs use Windhawk's existing storage.
+The installer registers **Dosya Konumunu Aç** in Windhawk, keeps the existing language and Mouse 5 preferences and grants the shell host read access to the required Windhawk files. Settings and logs use Windhawk's existing storage.
 
 Select `tr` or `en` in the extension's Windhawk settings to change the label. Disable the extension in Windhawk to remove the added command.
 
@@ -43,7 +43,7 @@ Select `tr` or `en` in the extension's Windhawk settings to change the label. Di
 
 The reusable menu implementation is contained in one file, `include\TaskbarMenuButton.hpp`, relative to this repository. Register a button from `Wh_ModInit` with `AddTaskbarButton(buttonName, callback)`. The callback receives only the resolved executable path and the application's display name from the existing menu. The header supplies Windhawk's cleanup and late-initialization exports.
 
-The file-location mod uses this API for its menu command. Its Mouse 4 callback reads the clicked taskbar model and shares the same executable resolver and folder-opening action. Installation embeds the header into Windhawk's source copy so that copy remains standalone.
+The file-location mod uses this API for its menu command. Its Mouse 5 callback reads the clicked taskbar model and shares the same executable resolver and folder-opening action. Installation embeds the header into Windhawk's source copy so that copy remains standalone.
 
 Windhawk's bundled C++ compiler builds the module. From the repository directory:
 

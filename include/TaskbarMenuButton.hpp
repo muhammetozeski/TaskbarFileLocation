@@ -45,6 +45,7 @@ using Callback = std::function<void(const std::wstring&, const std::wstring&)>;
 #include <winrt/Windows.UI.Xaml.h>
 #include <algorithm>
 #include <atomic>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -56,6 +57,7 @@ namespace TaskbarMenu::Detail {
 constexpr wchar_t HostClass[] = L"TaskbarMenuButton.Host." WH_MOD_ID;
 constexpr wchar_t UiClass[] = L"TaskbarMenuButton.Ui." WH_MOD_ID;
 constexpr UINT CleanupMessage = WM_APP + 0x317;
+constexpr UINT RunActionMessage = WM_APP + 0x318;
 constexpr ULONG_PTR OpenRequest = 0x54464C01;
 constexpr ULONG_PTR PathReport = 0x54464C02;
 constexpr GUID SupportedImage{0xadf87e58, 0x79a2, 0x571a,
@@ -73,6 +75,13 @@ std::mutex UiWindowsMutex;
 std::vector<HWND> UiWindows;
 thread_local std::wstring TargetPath;
 thread_local bool Updating{};
+struct ActionRequest {
+    std::wstring Path;
+    std::wstring ProgramName;
+    ULONGLONG QueuedAt{};
+};
+std::mutex ActionQueueMutex;
+std::deque<ActionRequest> PendingActions;
 
 using InitializeFunction = void(WINAPI*)(void*, void*, void*);
 using UpdateFunction = void(WINAPI*)(void*);
@@ -165,8 +174,55 @@ std::wstring ResolveExecutable(std::wstring path) {
 }
 
 
-/// Receives bounded UTF-16 requests in Explorer, outside the shell UI's app sandbox.
+/// Runs both menu and direct-click requests on the existing Explorer apartment thread.
+bool ExecuteAction(const ActionRequest& request) {
+    auto started = GetTickCount64();
+    Wh_SetIntValue(L"LastActionQueueDelayMs", started - request.QueuedAt);
+    Wh_SetIntValue(L"LastOpenSucceeded", 0);
+    bool succeeded = false;
+    try {
+        Wh_SetStringValue(L"LastRequestedPath", request.Path.c_str());
+        auto executable = ResolveExecutable(request.Path);
+        auto callback = GetAction();
+        callback(executable, request.ProgramName);
+        Wh_SetStringValue(L"LastActionExecutable", executable.c_str());
+        Wh_SetStringValue(L"LastActionProgramName", request.ProgramName.c_str());
+        Wh_SetIntValue(L"LastOpenError", 0);
+        succeeded = true;
+    } catch (const hresult_error& error) {
+        Wh_Log(L"Executing the taskbar callback failed: %08X %s",
+            static_cast<UINT>(error.code()), error.message().c_str());
+        Wh_SetIntValue(L"LastOpenError", error.code());
+    } catch (...) {
+        Wh_Log(L"Executing the taskbar callback failed with an unexpected exception");
+        Wh_SetIntValue(L"LastOpenError", E_FAIL);
+    }
+    Wh_SetIntValue(L"LastActionDurationMs", GetTickCount64() - started);
+    return succeeded;
+}
+
+/// Queues an Explorer-local action without blocking the taskbar's input thread.
+bool QueueAction(std::wstring path, std::wstring programName) {
+    auto host = HostWindow.load();
+    if (Stopping || !host) return false;
+    std::lock_guard lock(ActionQueueMutex);
+    PendingActions.push_back({std::move(path), std::move(programName), GetTickCount64()});
+    if (PostMessageW(host, RunActionMessage, 0, 0)) return true;
+    PendingActions.pop_back();
+    throw_last_error();
+}
+
+/// Receives bounded UTF-16 requests and drains Explorer-local queued actions.
 LRESULT CALLBACK HostProcedure(HWND window, UINT message, WPARAM sender, LPARAM parameter) {
+    if (message == RunActionMessage) {
+        std::deque<ActionRequest> requests;
+        { std::lock_guard lock(ActionQueueMutex); requests.swap(PendingActions); }
+        for (const auto& request : requests) {
+            if (Stopping) break;
+            ExecuteAction(request);
+        }
+        return 0;
+    }
     if (message == WM_COPYDATA && !Stopping) {
         auto packet = reinterpret_cast<const COPYDATASTRUCT*>(parameter);
         wchar_t senderClass[256]{};
@@ -183,27 +239,11 @@ LRESULT CALLBACK HostProcedure(HWND window, UINT message, WPARAM sender, LPARAM 
             return TRUE;
         }
         if (packet->dwData != OpenRequest) return FALSE;
-        try {
-            Wh_SetStringValue(L"LastRequestedPath", text);
-            Wh_SetIntValue(L"LastOpenSucceeded", 0);
-            auto separator = std::find(text, text + length, L'\0');
-            if (separator == text + length || separator + 1 >= text + length)
-                return FALSE;
-            std::wstring programName(separator + 1, text + length - 1);
-            auto executable = ResolveExecutable(std::wstring(text, separator));
-            auto callback = GetAction();
-            callback(executable, programName);
-            Wh_SetStringValue(L"LastActionExecutable", executable.c_str());
-            Wh_SetStringValue(L"LastActionProgramName", programName.c_str());
-            return TRUE;
-        } catch (const hresult_error& error) {
-            Wh_Log(L"Executing the taskbar callback failed: %08X %s",
-                static_cast<UINT>(error.code()), error.message().c_str());
-            Wh_SetIntValue(L"LastOpenError", error.code());
-        } catch (...) {
-            Wh_Log(L"Executing the taskbar callback failed with an unexpected exception");
-        }
-        return FALSE;
+        auto separator = std::find(text, text + length, L'\0');
+        if (separator == text + length || separator + 1 >= text + length)
+            return FALSE;
+        return ExecuteAction({std::wstring(text, separator),
+            std::wstring(separator + 1, text + length - 1), GetTickCount64()});
     }
     if (message == WM_CLOSE) { DestroyWindow(window); return 0; }
     if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
