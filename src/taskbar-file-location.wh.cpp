@@ -28,6 +28,8 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
+#include <appmodel.h>
+#include <tlhelp32.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.UI.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
@@ -71,6 +73,7 @@ InitializeFunction InitializeOriginal{};
 UpdateFunction UpdateOriginal{};
 VisibilityFunction VisibilityOriginal{};
 PathFunction ReadTargetPath{};
+PathFunction ReadTargetAppId{};
 DismissFunction DismissView{};
 decltype(&LoadLibraryExW) LoadLibraryOriginal{};
 
@@ -92,6 +95,37 @@ void LoadSettings() {
 
 /// Resolves a desktop shortcut when Windows supplies a shortcut instead of an executable.
 std::wstring ResolveExecutable(std::wstring path) {
+    constexpr std::wstring_view applicationPrefix = L"app-id:";
+    if (path.starts_with(applicationPrefix)) {
+        std::wstring applicationId = path.substr(applicationPrefix.size());
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE) throw_last_error();
+        PROCESSENTRY32W entry{sizeof(entry)};
+        std::wstring executable;
+        if (Process32FirstW(snapshot, &entry)) {
+            do {
+                HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+                if (!process) continue;
+                UINT32 size = 0;
+                if (GetApplicationUserModelId(process, &size, nullptr) == ERROR_INSUFFICIENT_BUFFER) {
+                    std::wstring processApplicationId(size, L'\0');
+                    if (GetApplicationUserModelId(process, &size, processApplicationId.data()) == ERROR_SUCCESS &&
+                        _wcsicmp(processApplicationId.c_str(), applicationId.c_str()) == 0) {
+                        executable.resize(32768);
+                        DWORD length = static_cast<DWORD>(executable.size());
+                        if (QueryFullProcessImageNameW(process, 0, executable.data(), &length))
+                            executable.resize(length);
+                        else executable.clear();
+                    }
+                }
+                CloseHandle(process);
+                if (!executable.empty()) break;
+            } while (Process32NextW(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
+        if (executable.empty()) throw_hresult(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+        path = executable;
+    }
     if (path.size() >= 2 && path.front() == L'"' && path.back() == L'"')
         path = path.substr(1, path.size() - 2);
     if (_wcsicmp(PathFindExtensionW(path.c_str()), L".lnk") == 0) {
@@ -108,7 +142,8 @@ std::wstring ResolveExecutable(std::wstring path) {
     if (!length || length > ARRAYSIZE(expanded)) throw_hresult(E_INVALIDARG);
     path = expanded;
     DWORD attributes = GetFileAttributesW(path.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
+    if (attributes == INVALID_FILE_ATTRIBUTES) throw_last_error();
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY)
         throw_hresult(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
     return path;
 }
@@ -163,6 +198,7 @@ LRESULT CALLBACK HostProcedure(HWND window, UINT message, WPARAM sender, LPARAM 
         }
         if (packet->dwData != OpenRequest) return FALSE;
         try {
+            Wh_SetStringValue(L"LastRequestedPath", text);
             Wh_SetIntValue(L"LastOpenSucceeded", 0);
             OpenExecutableFolder(std::wstring(text, length - 1));
             return TRUE;
@@ -419,6 +455,9 @@ void WINAPI InitializeHook(void* model, void* list, void* session) {
     try {
         hstring path{ReadTargetPath(session), take_ownership_from_abi};
         TargetPath = path;
+        hstring applicationId{ReadTargetAppId(session), take_ownership_from_abi};
+        if (std::wstring_view(applicationId).find(L'!') != std::wstring_view::npos)
+            TargetPath = L"app-id:" + std::wstring(applicationId);
         Wh_Log(L"Menu target: %s", TargetPath.c_str());
     } catch (...) { Wh_Log(L"Reading the menu target failed"); }
 }
@@ -466,6 +505,7 @@ bool HookJumpView(HMODULE module) {
     }
     auto base = reinterpret_cast<BYTE*>(module);
     ReadTargetPath = reinterpret_cast<PathFunction>(base + 0xb7b80);
+    ReadTargetAppId = reinterpret_cast<PathFunction>(base + 0xb7b20);
     DismissView = reinterpret_cast<DismissFunction>(base + 0x663c0);
     if (!Wh_SetFunctionHook(base + 0xf08a0, reinterpret_cast<void*>(InitializeHook),
             reinterpret_cast<void**>(&InitializeOriginal)) ||
