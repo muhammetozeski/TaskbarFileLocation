@@ -26,7 +26,11 @@ if (Test-Path -LiteralPath $configurationFile) {
     if ($previousLanguage.Success) { $language = $previousLanguage.Groups[1].Value }
 }
 Copy-Item -LiteralPath $module -Destination $installedLibrary
-Copy-Item -LiteralPath $source -Destination (Join-Path $paths.Data ('ModsSource\' + $modId + '.wh.cpp'))
+$modSource = Get-Content -LiteralPath $source -Raw
+$menuHeader = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'include\TaskbarMenuButton.hpp') -Raw
+$menuHeader = $menuHeader.Replace('#pragma once', '')
+$modSource = $modSource.Replace('#include "../include/TaskbarMenuButton.hpp"', $menuHeader)
+Set-Content -LiteralPath (Join-Path $paths.Data ('ModsSource\' + $modId + '.wh.cpp')) -Value $modSource -Encoding utf8
 $configuration = @"
 [Mod]
 LoggingEnabled=1
