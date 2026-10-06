@@ -42,7 +42,6 @@ using Callback = std::function<void(const std::wstring&, const std::wstring&)>;
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
-#include <winrt/Windows.UI.Xaml.Data.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <algorithm>
 #include <atomic>
@@ -79,12 +78,14 @@ using InitializeFunction = void(WINAPI*)(void*, void*, void*);
 using UpdateFunction = void(WINAPI*)(void*);
 using VisibilityFunction = void(WINAPI*)(void*, void*, void*);
 using PathFunction = HSTRING(WINAPI*)(void*);
+using DisplayNameFunction = void*(WINAPI*)(void*);
 using DismissFunction = void(WINAPI*)(void*, void*);
 InitializeFunction InitializeOriginal{};
 UpdateFunction UpdateOriginal{};
 VisibilityFunction VisibilityOriginal{};
 PathFunction ReadTargetPath{};
 PathFunction ReadTargetAppId{};
+DisplayNameFunction ReadItemDisplayName{};
 DismissFunction DismissView{};
 decltype(&LoadLibraryExW) LoadLibraryOriginal{};
 
@@ -317,14 +318,13 @@ Controls::ListViewBase FindSystemList(const DependencyObject& root, unsigned dep
     return nullptr;
 }
 
-/// Reads the application's own display label from the existing system-command list.
+/// Uses the same generated DisplayName accessor as Windows' XAML binding.
 std::wstring ReadVisibleProgramName(const Controls::ListViewBase& list) {
     if (!list.Items().Size()) throw_hresult(E_UNEXPECTED);
     auto item = list.Items().GetAt(0);
-    auto provider = item.as<Data::ICustomPropertyProvider>();
-    auto property = provider.GetCustomProperty(L"DisplayName");
-    if (!property) throw_hresult(E_NOINTERFACE);
-    auto name = unbox_value<hstring>(property.GetValue(item));
+    Windows::Foundation::IInspectable value{
+        ReadItemDisplayName(get_abi(item)), take_ownership_from_abi};
+    auto name = unbox_value<hstring>(value);
     if (name.empty()) throw_hresult(E_UNEXPECTED);
     return std::wstring(name);
 }
@@ -514,6 +514,7 @@ bool HookJumpView(HMODULE module) {
     auto base = reinterpret_cast<BYTE*>(module);
     ReadTargetPath = reinterpret_cast<PathFunction>(base + 0xb7b80);
     ReadTargetAppId = reinterpret_cast<PathFunction>(base + 0xb7b20);
+    ReadItemDisplayName = reinterpret_cast<DisplayNameFunction>(base + 0x8a4b0);
     DismissView = reinterpret_cast<DismissFunction>(base + 0x663c0);
     if (!Wh_SetFunctionHook(base + 0xf08a0, reinterpret_cast<void*>(InitializeHook),
             reinterpret_cast<void**>(&InitializeOriginal)) ||
