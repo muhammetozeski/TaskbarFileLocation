@@ -294,11 +294,18 @@ bool EnsureMenuRow(void* rawFrame) {
         ~UpdateGuard() { Updating = false; }
     } guard;
     try {
-        Windows::Foundation::IInspectable object{nullptr};
-        copy_from_abi(object, rawFrame);
-        auto frame = object.as<FrameworkElement>();
+        auto window = Window::Current();
+        if (!window || !window.Content()) return false;
+        auto frame = window.Content().try_as<FrameworkElement>();
+        if (!frame) return false;
         if (auto control = frame.try_as<Controls::Control>()) control.ApplyTemplate();
         auto list = FindSystemList(frame);
+        if (!list) {
+            for (auto popup : Media::VisualTreeHelper::GetOpenPopups(window)) {
+                list = FindSystemList(popup.Child());
+                if (list) break;
+            }
+        }
         if (!list) return false;
         auto& state = GetUiState();
         auto found = std::find_if(state.Rows.begin(), state.Rows.end(),
