@@ -1,9 +1,52 @@
 # TaskbarFileLocation
 
-A C++ Windhawk extension in development that adds **Dosya Konumunu Aç** to the existing taskbar app menu and opens the app executable's containing folder in File Explorer.
+![Windows](https://img.shields.io/badge/Windows-11_x64-0078D4)
+![C++](https://img.shields.io/badge/C%2B%2B-23-00599C)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-The implementation must preserve existing menu commands and resolve the app behind the clicked taskbar item, including pinned desktop apps.
+Open an application's executable folder directly from its taskbar menu.
 
-## Status
+Right-click an application on the taskbar and select **Dosya Konumunu Aç**. The English label is **Open File Location**. Existing application tasks, recent items and window commands are preserved.
 
-Implementation and verification are in progress. Windows 11 build 26300 is the local development target. Windhawk is already available on the development computer.
+The extension reads the application path from the Windows jump-list session. File Explorer opens the executable's containing directory; shortcuts are resolved to their targets.
+
+## Requirements
+
+- Windows 11, 64-bit.
+- Portable [Windhawk](https://windhawk.net/), already running.
+- This first version targets **JumpViewUI.dll 10.0.26100.9549**, symbol identifier **ADF87E5879A2571AC6566850798F0A6B1**.
+
+The extension checks that identity before attaching its native hooks. It does not download symbols or packages.
+
+## Installation
+
+Extract the release package and run the following command from its directory:
+
+```powershell
+pwsh -File .\Install.ps1
+```
+
+For a Windhawk directory that is not available through PATH:
+
+```powershell
+pwsh -File .\Install.ps1 -WindhawkDirectory "C:\Path\To\Windhawk"
+```
+
+The installer registers **Dosya Konumunu Aç** in Windhawk, keeps the existing language preference and grants the shell host read access to the required Windhawk files. Settings and logs use Windhawk's existing storage.
+
+Select `tr` or `en` in the extension's Windhawk settings to change the label. Disable the extension in Windhawk to remove the added command.
+
+## Source build
+
+Windhawk's bundled C++ compiler builds the module. From the repository directory:
+
+```powershell
+pwsh -File .\Build.ps1
+pwsh -File .\Install.ps1
+```
+
+The compiled module is placed in `publish\AppData\TaskbarFileLocation.dll`, relative to the repository directory.
+
+## Development status
+
+The C++ module builds successfully and loads into both Explorer and ShellExperienceHost. The first interactive menu check is in progress.
