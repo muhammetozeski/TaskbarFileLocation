@@ -20,10 +20,13 @@ $libraryName = $modId + '_' + $version + '_' + [DateTimeOffset]::UtcNow.ToUnixTi
 $installedLibrary = Join-Path $libraryDirectory $libraryName
 $configurationFile = Join-Path $modsDirectory ($modId + '.ini')
 $language = 'tr'
+$mouseFourOpensFolder = '1'
 if (Test-Path -LiteralPath $configurationFile) {
     $previousConfiguration = Get-Content -LiteralPath $configurationFile -Raw
     $previousLanguage = [regex]::Match($previousConfiguration, '(?m)^language=(tr|en)\s*$')
     if ($previousLanguage.Success) { $language = $previousLanguage.Groups[1].Value }
+    $previousMouseFour = [regex]::Match($previousConfiguration, '(?m)^mouse4OpensFolder=(0|1)\s*$')
+    if ($previousMouseFour.Success) { $mouseFourOpensFolder = $previousMouseFour.Groups[1].Value }
 }
 Copy-Item -LiteralPath $module -Destination $installedLibrary
 $modSource = Get-Content -LiteralPath $source -Raw
@@ -44,6 +47,7 @@ SettingsChangeTime=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
 
 [Settings]
 language=$language
+mouse4OpensFolder=$mouseFourOpensFolder
 "@
 Set-Content -LiteralPath $configurationFile -Value $configuration -Encoding unicode
 $readableFiles = @(
