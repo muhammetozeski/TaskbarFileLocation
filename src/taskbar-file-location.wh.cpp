@@ -294,8 +294,12 @@ bool EnsureMenuRow(void* rawFrame) {
         ~UpdateGuard() { Updating = false; }
     } guard;
     try {
+        Wh_SetStringValue(L"MenuStage", L"enter");
         auto window = Window::Current();
-        if (!window || !window.Content()) return false;
+        if (!window || !window.Content()) {
+            Wh_SetStringValue(L"MenuStage", L"no-current-window");
+            return false;
+        }
         auto frame = window.Content().try_as<FrameworkElement>();
         if (!frame) return false;
         if (auto control = frame.try_as<Controls::Control>()) control.ApplyTemplate();
@@ -306,7 +310,11 @@ bool EnsureMenuRow(void* rawFrame) {
                 if (list) break;
             }
         }
-        if (!list) return false;
+        if (!list) {
+            Wh_SetStringValue(L"MenuStage", L"system-list-not-found");
+            Wh_SetStringValue(L"WindowContentClass", get_class_name(frame).c_str());
+            return false;
+        }
         auto& state = GetUiState();
         auto found = std::find_if(state.Rows.begin(), state.Rows.end(),
             [&](const MenuRow& row) { return row.List == list; });
@@ -317,7 +325,10 @@ bool EnsureMenuRow(void* rawFrame) {
             return false;
         }
         auto parent = Media::VisualTreeHelper::GetParent(list).try_as<Controls::Panel>();
-        if (!parent) return false;
+        if (!parent) {
+            Wh_SetStringValue(L"MenuStage", L"list-parent-is-not-panel");
+            return false;
+        }
         uint32_t index{};
         if (!parent.Children().IndexOf(list, index)) return false;
         MenuRow row;
@@ -378,8 +389,10 @@ bool EnsureMenuRow(void* rawFrame) {
         state.Rows.push_back(std::move(row));
         SendPath(endpoint, PathReport, TargetPath);
         Wh_Log(L"Inserted the file-location command");
+        Wh_SetStringValue(L"MenuStage", L"inserted");
         return true;
     } catch (const hresult_error& error) {
+        Wh_SetStringValue(L"MenuStage", error.message().c_str());
         Wh_Log(L"Adding the menu row failed: %08X %s", static_cast<UINT>(error.code()), error.message().c_str());
     } catch (...) { Wh_Log(L"Adding the menu row failed with an unexpected exception"); }
     return false;
@@ -387,6 +400,7 @@ bool EnsureMenuRow(void* rawFrame) {
 
 /// Obtains the path from the same Windows session which populates the clicked app's menu.
 void WINAPI InitializeHook(void* model, void* list, void* session) {
+    Wh_SetStringValue(L"InitializeHook", L"called");
     InitializeOriginal(model, list, session);
     TargetPath.clear();
     if (Stopping) return;
@@ -398,11 +412,13 @@ void WINAPI InitializeHook(void* model, void* list, void* session) {
 }
 
 void WINAPI UpdateHook(void* frame) {
+    Wh_SetStringValue(L"UpdateHook", L"called");
     EnsureMenuRow(frame);
     UpdateOriginal(frame);
 }
 
 void WINAPI VisibilityHook(void* frame, void* sender, void* arguments) {
+    Wh_SetStringValue(L"VisibilityHook", L"called");
     VisibilityOriginal(frame, sender, arguments);
     if (EnsureMenuRow(frame)) UpdateOriginal(frame);
 }
@@ -447,6 +463,7 @@ bool HookJumpView(HMODULE module) {
             reinterpret_cast<void**>(&VisibilityOriginal)))
         return false;
     Hooked = true;
+    Wh_SetStringValue(L"JumpViewHooks", L"installed");
     return true;
 }
 
@@ -500,3 +517,9 @@ void Wh_ModUninit() {
 }
 
 void Wh_ModSettingsChanged() { LoadSettings(); }
+
+void Wh_ModAfterInit() {
+    if (!IsExplorer && !Hooked)
+        if (auto module = GetModuleHandleW(L"JumpViewUI.dll"))
+            if (HookJumpView(module)) Wh_ApplyHookOperations();
+}
