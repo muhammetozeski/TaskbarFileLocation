@@ -8,7 +8,7 @@ Open an application's executable folder directly from its taskbar menu.
 
 Right-click an application on the taskbar and select **Dosya Konumunu Aç**. The English label is **Open File Location**. Existing application tasks, recent items and window commands are preserved.
 
-The extension reads the application path from the Windows jump-list session. File Explorer opens the executable's containing directory; shortcuts are resolved to their targets.
+The extension reads the application path from the Windows jump-list session. File Explorer opens the executable's containing directory; shortcuts are resolved to their targets. Packaged applications are matched by application identity to a running process, and Windows supplies the executable path.
 
 ## Requirements
 
@@ -47,6 +47,6 @@ pwsh -File .\Install.ps1
 
 The compiled module is placed in `publish\AppData\TaskbarFileLocation.dll`, relative to the repository directory.
 
-## Development status
+## Verified behavior
 
-The C++ module builds successfully and loads into both Explorer and ShellExperienceHost. The first interactive menu check is in progress.
+The taskbar command opened the executable directories for Windhawk, WinRAR and ChatGPT (the Codex desktop package). The command appeared after enabling the module without restarting Explorer. Directory access used normal user privileges.
