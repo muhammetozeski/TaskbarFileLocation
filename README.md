@@ -38,6 +38,10 @@ Select `tr` or `en` in the extension's Windhawk settings to change the label. Di
 
 ## Source build
 
+The reusable menu implementation is contained in one file, `include\TaskbarMenuButton.hpp`, relative to this repository. Register a button from `Wh_ModInit` with `AddTaskbarButton(buttonName, callback)`. The callback receives only the resolved executable path and the application's display name from the existing menu. The header supplies Windhawk's cleanup and late-initialization exports.
+
+The file-location mod uses this API; its source keeps only language selection and the folder-opening action. Installation embeds the header into Windhawk's source copy so that copy remains standalone.
+
 Windhawk's bundled C++ compiler builds the module. From the repository directory:
 
 ```powershell
